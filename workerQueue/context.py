@@ -28,9 +28,10 @@ class Context:
         self.serializers = serializers
         self.c2s = {s.cls: s for s in serializers}
 
-    def add_serializer(self, s):
-        self.serializers.append(s)
-        self.c2s[s.cls] = s
+    def add_serializer(self, *s):
+        for _s in s:
+            self.serializers.append(_s)
+            self.c2s[_s.cls] = _s
 
     def load(self, _id):
         """
@@ -74,9 +75,7 @@ class Context:
         """
 
         if hasattr(a, '__class__'):
-
             for s in self.serializers:
-                print(a, s.cls, isinstance(a, s.cls))
                 if isinstance(a, s.cls):
                     return {
                         'cls': s.cls.__name__,

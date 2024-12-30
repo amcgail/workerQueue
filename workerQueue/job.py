@@ -1,7 +1,10 @@
 from .common import *
 
+import json
+import hashlib
+
 class Job:
-    def __init__(self, _id=None, _job_metadata=None, **kwargs):
+    def __init__(self, _id=None, _job_metadata=None, _force=False, **kwargs):
         from .context import c as context
 
         self.c = context
@@ -10,27 +13,45 @@ class Job:
         if _job_metadata is None:
             _job_metadata = {}
 
+        name = self.__class__.__name__
+
         if _id is None:
-            print([x.cls for x in self.c.serializers])
-            print(self.c.compress_args(kwargs))
-            print(kwargs)
+
+            # very useful for retrieving the job later
+            kwargs = self.c.compress_args(kwargs)
+            kwargs_hash = hashlib.sha256(json.dumps({'name': name, 'args': kwargs}, sort_keys=True).encode()).hexdigest()
+
+            # here we check if the job is already in the database
+            # if it is, we load it
+            if not _force:
+
+                _find = self.db.find_one({
+                    'hash': kwargs_hash,
+                })
+
+                if _find is not None:
+                    self._info = _find
+                    self.id = _find['_id']
+                    return
+
             _def = {
-                'type': self.__class__.__name__,
+                'type': name,
                 'when': dt.now(),
-                'args': self.c.compress_args(kwargs),
+                'args': kwargs,
+                'hash': kwargs_hash,
                 'claimed': None,
                 'completed': False,
                 'ready': False,
-                'then': [],
-                'trigger_ids': [],
                 **_job_metadata
             }
-            print(_def)
+            
             self._info = _def
             self.save()
 
             d = self.extract_dependencies(self['args'])
-            self.push('trigger_ids', [x.id for x in d])
+            if len(d):
+                self.push('trigger_ids', [x.id for x in d])
+
             for x in d:
                 x.push('then', self.id)
 
@@ -84,15 +105,15 @@ class Job:
         """
         This function propagates out to the leaves, starting all dependencies of dependences of...
         """
-        logger.info(f"Queueing task {self.__class__.__name__}")
-
         # if there are dependencies, offload the responsibility to them
         deps = self.extract_dependencies(self['args'])
         if len(deps):
             for dep in self.extract_dependencies(self['args']):
                 dep.queue()
 
-        self['ready'] = True
+        if not self['ready']:
+            logger.info(f"Queueing task {self.__class__.__name__}")
+            self['ready'] = True
 
         return self
 
@@ -163,10 +184,27 @@ class Job:
 
             logger.info(f"... triggering task {then_id} ({_upd.modified_count} records updated)")
 
+        return _result
 
+    def __call__(self, now=True):
+        
+        if now:
+            if self['completed']:
+                return self['result']
+            
+            return self.run_wrapper()
+        
+        else:
+            # obviously we want it to be done, if we're calling it...
+            if not self['completed']:
+                self.queue()
+
+            return {
+                'done': self['completed'],
+                'result': self['result'] if self['completed'] else None
+            }
 
     # some helper functions
-    
     def __contains__(self, key):
         return key in self._info
         
@@ -201,7 +239,7 @@ class Job:
         if not hasattr(self, 'id'):
             self.id = self.db.insert_one(self._info).inserted_id
         else:
-            self.db.jobs.update_one(
+            self.db.update_one(
                 {'_id': self.id},
                 {'$set': self._info}
             )
