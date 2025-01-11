@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "workerQueue"
-version = "0.0.2"
+version = "0.0.3"
 description = "A simple distributed job queue using a MongoDB backend."
 readme = "README.md"
 requires-python = ">=3.7"

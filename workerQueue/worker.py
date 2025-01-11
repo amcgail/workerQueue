@@ -5,8 +5,35 @@ class Worker:
     def __init__(self):
         self.c = c
 
-    def work(self):
+    def work(self, monitor_dir=None):
         from .job import Job
+
+        if monitor_dir is not None:
+            # checking for changes
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
+
+            class Handler(FileSystemEventHandler):
+                def __init__(self):
+                    super().__init__()
+
+                    self.wishing_death = False
+
+                def on_modified(self, event):
+                    self.wishing_death = True
+                
+                def on_created(self, event):
+                    self.wishing_death = True
+
+                def on_deleted(self, event):
+                    self.wishing_death = True
+
+            observer = Observer()
+            h = Handler()
+
+            observer.schedule(h, monitor_dir, recursive=True)
+            observer.start()
+
 
         from importlib import import_module
         from time import sleep
@@ -14,6 +41,11 @@ class Worker:
         last_slept = False
 
         while True:
+            # check if we should exit
+            if monitor_dir is not None and h.wishing_death:
+                logger.info('Detected change, exiting.')
+                break
+
             claim_id = dt.now()
 
             # find a task to work on
